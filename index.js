@@ -6,7 +6,6 @@ const mineflayer = require('mineflayer');
 const fs = require('fs');
 
 const MY_USERNAME = 'SKSER404'; 
-
 const botOptions = {
     host: 'node.glorpiware.net', 
     port: 10002,
@@ -15,13 +14,16 @@ const botOptions = {
     checkTimeoutInterval: 180000, 
     noDelay: true,                
     keepAlive: true,
-    physicsEnabled: false,
-    viewDistance: 'tiny' // 📉 The "Internet Shield" - uses almost zero data
+    physicsEnabled: false, 
+    viewDistance: 'tiny' 
 };
 
 let startTime = Date.now();
+let lastMeowTime = 0; 
 let manualQuit = false;
-let mentionMemory = {}; 
+let foodsEaten = 0; 
+let autoRestartMins = 360; 
+let restartTimer;
 
 function logAll(type, user, message) {
     const time = new Date().toLocaleTimeString();
@@ -30,108 +32,141 @@ function logAll(type, user, message) {
     fs.appendFileSync('chat.log', entry + '\n');
 }
 
-async function performEat(bot) {
-    const food = bot.inventory.items().find(i => 
-        ['apple', 'cooked', 'bread', 'steak', 'pork', 'mutton', 'fish', 'golden'].some(n => i.name.includes(n))
-    );
-    if (food) {
-        try {
-            await bot.equip(food, 'hand');
-            await bot.consume();
-            logAll("ACTION", "BOT", `Ate ${food.name}`);
-            return true;
-        } catch (e) { return false; }
+// 🛡️ MEMORY WATCHDOG
+function checkMemory() {
+    const usage = process.memoryUsage().rss / 1024 / 1024;
+    if (usage > 500) {
+        logAll("CRITICAL", "SYSTEM", `RAM overload (${Math.round(usage)}MB). Resetting...`);
+        process.exit(1);
     }
-    return false;
+}
+setInterval(checkMemory, 300000); 
+
+function getFoodStats(bot) {
+    const edibleNames = ['steak', 'cook', 'apple', 'bread', 'pork', 'mutton', 'fish', 'golden', 'cookie', 'melon', 'carrot', 'potato', 'pie', 'beef', 'chicken'];
+    const foods = bot.inventory.items().filter(i => edibleNames.some(name => i.name.toLowerCase().includes(name)));
+    let totalItems = 0;
+    const list = foods.map(i => {
+        totalItems += i.count;
+        return `${i.count}x ${i.name}`;
+    }).join(', ');
+    return { list: list || "None", total: totalItems };
+}
+
+function countTotems(bot) {
+    let count = bot.inventory.items().filter(item => item.name.includes('totem')).reduce((total, item) => total + item.count, 0);
+    const offhand = bot.inventory.slots[45];
+    if (offhand && offhand.name.includes('totem')) count += offhand.count;
+    return count;
 }
 
 function createBot() {
-    logAll("SYSTEM", "BOT", "🛡️ Final Night Sentry Active.");
+    logAll("SYSTEM", "BOT", `🛡️ SKxAFK V6.0.5 Online.`);
     const bot = mineflayer.createBot(botOptions);
     startTime = Date.now();
     manualQuit = false;
+
+    if (restartTimer) clearTimeout(restartTimer);
+    restartTimer = setTimeout(() => { if(!manualQuit) bot.quit(); }, autoRestartMins * 60000); 
 
     bot.on('login', () => {
         setTimeout(() => bot.chat("/login 80408040Sk"), 5000);
     });
 
-    bot.on('health', () => { if (bot.food < 14) performEat(bot); });
-
-    bot.on('playerJoined', (player) => {
-        if (player.username === MY_USERNAME) {
-            setTimeout(() => {
-                bot.chat(`Welcome back, Master ${MY_USERNAME}!`);
-                logAll("REPLY", "BOT", `Greeted Master ${MY_USERNAME}`);
-            }, 3000); 
-        }
-    });
-
     bot.on('chat', (username, message) => {
         if (username === bot.username) return;
-        const msg = message.toLowerCase();
-        if (msg.includes('meow')) { bot.chat("Meow!"); logAll("CHAT", username, message); }
-        if (msg.includes('not_sk')) { handleMention(bot, username, false); logAll("CHAT", username, message); }
+        if (/meow/i.test(message)) {
+            const now = Date.now();
+            if (now - lastMeowTime > 30000) {
+                bot.chat("Meow!"); 
+                lastMeowTime = now;
+            }
+        }
     });
 
     bot.on('whisper', async (username, message) => {
-        logAll("WHISPER", username, message);
-        const msg = message.toLowerCase();
-        if (msg.includes('not_sk')) handleMention(bot, username, true);
-        if (username !== MY_USERNAME) return;
+        if (username === bot.username) return;
+        if (username === MY_USERNAME) {
+            const args = message.split(' ');
+            const command = args[0].toLowerCase();
 
-        const args = message.split(' ');
-        const command = args[0].toLowerCase();
+            if (command === '!status') {
+                const upMins = Math.floor((Date.now() - startTime) / 60000);
+                const mem = Math.round(process.memoryUsage().rss / 1024 / 1024);
+                const t = countTotems(bot);
+                const resp = `❤️ HP: ${Math.round(bot.health)} | 🍖 ${Math.round(bot.food)}/20 | 🛡️ ${t} | 🕒 ${upMins}m | 🍱 ${foodsEaten} | 💾 ${mem}MB`;
+                bot.whisper(username, resp);
+                return;
+            }
 
-        if (command === '!help') {
-            const r = "CMDS: !status, !food, !eat, !drop, !cmd, !resetmemory, !restart, !quit";
-            bot.whisper(username, r); logAll("REPLY", "BOT", r);
+            if (command === '!food') {
+                const stats = getFoodStats(bot);
+                bot.whisper(username, `🍱 Total: ${stats.total} | Pantry: ${stats.list}`);
+                return;
+            }
+
+            // ✅ RESTORED: !cmd works again
+            if (command === '!cmd') {
+                const serverCmd = args.slice(1).join(' ');
+                if (serverCmd) bot.chat(`/${serverCmd}`);
+                return;
+            }
+
+            // ✅ RESTORED: !help is back
+            if (command === '!help') {
+                bot.whisper(username, "CMDS: !status, !food, !totem, !cmd [text], !restart, !quit");
+                return;
+            }
+
+            if (command === '!totem') {
+                bot.whisper(username, `🛡️ Total Totems: ${countTotems(bot)}`);
+                return;
+            }
+
+            if (command === '!restart') {
+                bot.whisper(username, "🔄 Restarting...");
+                setTimeout(() => process.exit(1), 500); 
+                return;
+            }
+
+            // ✅ FIXED: !quit now stops PM2 from restarting it
+            if (command === '!quit') {
+                manualQuit = true; 
+                bot.whisper(username, "🛑 Killing process."); 
+                setTimeout(() => { 
+                    bot.quit(); 
+                    // This command tells PM2 to stop this specific process
+                    const exec = require('child_process').exec;
+                    exec('pm2 stop Not_SK'); 
+                }, 1000); 
+                return;
+            }
+        } 
+        
+        if (/meow/i.test(message)) {
+            const now = Date.now();
+            if (now - lastMeowTime > 30000) {
+                bot.chat(`/msg ${username} Meow!`); 
+                lastMeowTime = now;
+            }
         }
-        else if (command === '!status') {
-            const up = Math.floor((Date.now() - startTime) / 1000 / 60);
-            const r = `❤️ HP: ${Math.round(bot.health)} | 🍖 Food: ${Math.round(bot.food)}/20 | 🕒 ${up}m`;
-            bot.whisper(username, r); logAll("REPLY", "BOT", r);
-        }
-        else if (command === '!food') {
-            const f = bot.inventory.items().filter(i => ['apple', 'cooked', 'bread', 'steak', 'pork', 'mutton', 'fish', 'golden'].some(n => i.name.includes(n)));
-            const list = f.length ? f.map(i => `${i.count}x ${i.name}`).join(', ') : "None";
-            bot.whisper(username, `🍱 Pantry: ${list}`); logAll("REPLY", "BOT", `Pantry: ${list}`);
-        }
-        else if (command === '!cmd') {
-            const serverCmd = args.slice(1).join(' ');
-            if (serverCmd) { bot.chat(`/${serverCmd}`); logAll("REPLY", "BOT", `Executed /${serverCmd}`); }
-        }
-        else if (command === '!drop') {
-            const item = bot.inventory.slots[bot.getEquipmentDestSlot('hand')];
-            if (item) { await bot.tossStack(item); logAll("REPLY", "BOT", `Dropped ${item.name}`); }
-        }
-        else if (command === '!eat') {
-            const success = await performEat(bot);
-            bot.whisper(username, success ? "✅ Eating..." : "❌ No food.");
-        }
-        else if (command === '!quit') {
-            manualQuit = true; bot.chat("Bye!");
-            setTimeout(() => { bot.quit(); setTimeout(() => process.exit(0), 500); }, 1000);
-        }
-        else if (command === '!restart') { bot.quit(); }
     });
 
-    bot.on('error', (err) => logAll("ERROR", "SYSTEM", err.message));
+    bot.on('health', async () => { 
+        if (bot.food < 16) {
+            const edibleNames = ['steak', 'cook', 'apple', 'bread', 'pork', 'mutton', 'fish', 'golden', 'cookie', 'melon', 'carrot', 'potato', 'pie', 'beef', 'chicken'];
+            const food = bot.inventory.items().find(i => edibleNames.some(n => i.name.toLowerCase().includes(n)));
+            if (food) { try { await bot.equip(food, 'hand'); await bot.consume(); foodsEaten++; } catch (e) {} }
+        }
+        const totem = bot.inventory.items().find(item => item.name.includes('totem'));
+        const offhand = bot.inventory.slots[45]; 
+        if (totem && (!offhand || !offhand.name.includes('totem'))) { try { await bot.equip(totem, 'off-hand'); } catch (e) {} }
+    });
+
     bot.on('end', () => {
-        if (!manualQuit) {
-            logAll("SYSTEM", "BOT", "🔌 Reconnecting...");
-            setTimeout(createBot, 5000); // 5s fast reconnect
-        }
+        clearTimeout(restartTimer);
+        if (!manualQuit) setTimeout(createBot, 30000); 
     });
-}
-
-function handleMention(bot, username, isPrivate) {
-    if (!mentionMemory[username]) mentionMemory[username] = 0;
-    mentionMemory[username]++;
-    let reply = (mentionMemory[username] === 1) ? "Hi!" : (mentionMemory[username] === 2) ? "I'm a bot." : "";
-    if (reply) {
-        isPrivate ? bot.whisper(username, reply) : bot.chat(reply);
-        logAll("REPLY", "BOT", `${username} -> ${reply}`);
-    }
 }
 
 createBot();
