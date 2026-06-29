@@ -1,3 +1,7 @@
+// © copyright @ITACHI_404
+// © https://github.com/sanjith404
+
+
 const http = require('http');
 // Tiny server to keep Render happy
 http.createServer((req, res) => { res.write("Bot Online"); res.end(); }).listen(process.env.PORT || 10000);
