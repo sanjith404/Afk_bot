@@ -1,9 +1,8 @@
-// © copyright @ITACHI_404
+// © copyright https://t.me/ITACHI_404
 // © https://github.com/sanjith404
 
 
 const http = require('http');
-// Tiny server to keep Render happy
 http.createServer((req, res) => { res.write("Bot Online"); res.end(); }).listen(process.env.PORT || 10000);
 
 const mineflayer = require('mineflayer');
@@ -36,7 +35,7 @@ function logAll(type, user, message) {
     fs.appendFileSync('chat.log', entry + '\n');
 }
 
-// 🛡️ MEMORY WATCHDOG
+//  MEMORY WATCHDOG
 function checkMemory() {
     const usage = process.memoryUsage().rss / 1024 / 1024;
     if (usage > 500) {
@@ -108,15 +107,12 @@ function createBot() {
                 bot.whisper(username, `🍱 Total: ${stats.total} | Pantry: ${stats.list}`);
                 return;
             }
-
-            // ✅ RESTORED: !cmd works again
             if (command === '!cmd') {
                 const serverCmd = args.slice(1).join(' ');
                 if (serverCmd) bot.chat(`/${serverCmd}`);
                 return;
             }
 
-            // ✅ RESTORED: !help is back
             if (command === '!help') {
                 bot.whisper(username, "CMDS: !status, !food, !totem, !cmd [text], !restart, !quit");
                 return;
@@ -133,7 +129,6 @@ function createBot() {
                 return;
             }
 
-            // ✅ FIXED: !quit now stops PM2 from restarting it
             if (command === '!quit') {
                 manualQuit = true; 
                 bot.whisper(username, "🛑 Killing process."); 
